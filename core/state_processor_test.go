@@ -422,3 +422,60 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	}
 	return types.NewBlock(header, body, receipts, trie.NewStackTrie(nil))
 }
+
+func TestStateProcessor(t *testing.T) {
+	// 创建一个测试账户和私钥
+	key, _ := crypto.GenerateKey()
+	address := crypto.PubkeyToAddress(key.PublicKey)
+
+	// 创建一个测试区块链配置
+	chainConfig := params.TestChainConfig
+	engine := ethash.NewFaker()
+
+	// 创建创世区块配置
+	genesis := &Genesis{
+		Config: chainConfig,
+		Alloc: GenesisAlloc{
+			address: {Balance: big.NewInt(1000000)},
+		},
+	}
+
+	// 创建区块链
+	db := rawdb.NewMemoryDatabase()
+	chain, _ := NewBlockChain(db, nil, genesis, nil, engine, vm.Config{}, nil)
+	defer chain.Stop()
+
+	// 创建一个测试交易
+	tx, _ := types.SignTx(
+		types.NewTransaction(0, common.Address{1}, big.NewInt(100), 21000, big.NewInt(1), nil),
+		types.NewEIP155Signer(chainConfig.ChainID),
+		key,
+	)
+
+	// 创建一个新的区块
+	block := types.NewBlock(
+		&types.Header{
+			ParentHash: genesis.ToBlock().Hash(),
+			Number:     big.NewInt(1),
+			GasLimit:   genesis.ToBlock().GasLimit(),
+			Time:       genesis.ToBlock().Time() + 10,
+			BaseFee:    big.NewInt(params.InitialBaseFee),
+		},
+		&types.Body{Transactions: []*types.Transaction{tx}},
+		nil, // receipts
+		trie.NewStackTrie(nil),
+	)
+
+	// 创建 StateProcessor
+	processor := NewStateProcessor(chainConfig, chain.HeaderChain())
+
+	// 设置断点并执行 Process
+	statedb, _ := chain.StateAt(genesis.ToBlock().Root())
+	receipts, err := processor.Process(block, statedb, vm.Config{})
+
+	if err != nil {
+		t.Fatalf("处理区块失败: %v", err)
+	}
+
+	t.Logf("Receipts: %v", receipts)
+}
